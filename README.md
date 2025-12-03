@@ -1,19 +1,15 @@
-# 🚀 最終部署指南：從零開始的 VM 基礎設施自動化
-
-本指南包含了 VM 範本 (Template) 的最佳化、NFS 共享服務配置，以及所有 VM 的 SSH 無密碼設定與客戶端初始配置。
-
----
+# 🚀 最終部署指南：純指令配置模式 (GitHub 專用)
 
 ## 🎯 階段一：VM 範本準備與通用化
 
 | 階段 | 主題強調 | 執行指令 | 目的與說明 |
 | :--- | :--- | :--- | :--- |
-| **I. 預裝服務** | **所有 VM 必備** | `sudo apt update`<br>`sudo apt install -y openssh-server nfs-common nfs-kernel-server` | 安裝 SSH 伺服器和 NFS 共享所需的所有工具。 |
-| **II. 創建掛載點** | **客戶端準備** | `sudo mkdir -p /mnt/getshare` | 預先創建 NFS 掛載點。 |
-| **III. 日誌優化** | **硬碟空間保護** | **編輯:** `sudo nano /etc/systemd/journald.conf` <br>**設定:** `SystemMaxUse=500M` | 限制系統日誌大小，防止根目錄 `/` 被佔滿。 |
-| **IV. 清理 Host Key** | **防止 SSH 衝突** | `sudo rm -f /etc/ssh/ssh_host_*` | **最關鍵！** 移除主機唯一識別符，確保複製出的 VM 啟動時自動生成新 Key。 |
-| **V. 清理記錄** | **網路/快取** | `sudo rm -f /etc/udev/rules.d/70-persistent-net.rules`<br>`sudo apt clean`<br>`history -c && rm -f ~/.bash_history` | 清理舊的 MAC 地址綁定記錄、系統快取和 Bash 歷史記錄。 |
-| **VI. 製作範本** | **最後一步** | `sudo shutdown now` | 正常關機，然後在 ESXi 中將此 VM 轉換為範本。 |
+| **I. 預裝服務** | **所有 VM 必備** | `sudo apt update`<br>`sudo apt install -y openssh-server nfs-common nfs-kernel-server` | |
+| **II. 創建掛載點** | **客戶端準備** | `sudo mkdir -p /mnt/getshare` | |
+| **III. 日誌優化** | **硬碟空間保護** | `sudo nano /etc/systemd/journald.conf`<br>`SystemMaxUse=500M` | |
+| **IV. 清理 Host Key** | **防止 SSH 衝突** | `sudo rm -f /etc/ssh/ssh_host_*` | |
+| **V. 清理記錄** | **網路/快取** | `sudo rm -f /etc/udev/rules.d/70-persistent-net.rules`<br>`sudo apt clean`<br>`history -c && rm -f ~/.bash_history` | |
+| **VI. 製作範本** | **最後一步** | `sudo shutdown now` | |
 
 ---
 
@@ -21,11 +17,10 @@
 
 | 階段 | 主題強調 | 設備 | 執行指令 / 內容 | 目的與說明 |
 | :--- | :--- | :--- | :--- | :--- |
-| **VII. 準備路徑** | **共享目錄** | 伺服器 | `sudo mkdir -p /home/ubn/Shared`<br>`sudo chown ubn:ubn /home/ubn/Shared` | 創建共享目錄並確保 `ubn` 擁有者權限。 |
-| **VIII. 放置檔案** | **資料確認** | 伺服器 | `mv /home/ubn/run.sh /home/ubn/Shared/` | 將要共享的檔案放入正確路徑。 |
-| **IX. 設定匯出** | **配置檔案位置** | 伺服器 | **編輯：** `sudo nano /etc/exports` | 以 root 權限編輯 NFS 匯出配置。 |
-| **X. 匯出路徑** | **IP 與路徑** | 伺服器 | **新增：** `/home/ubn/Shared 192.168.8.0/24(rw,sync,no_subtree_check)` | 允許 $192.168.8.x$ 網段存取正確的路徑。 |
-| **XI. 啟用服務** | **立即生效** | 伺服器 | `sudo exportfs -ra`<br>`sudo systemctl restart nfs-server` | 重新載入配置並重啟 NFS 服務。 |
+| **VII. 準備路徑** | **共享目錄** | 伺服器 | `sudo mkdir -p /home/ubn/Shared`<br>`sudo chown ubn:ubn /home/ubn/Shared` | |
+| **VIII. 放置檔案** | **資料確認** | 伺服器 | `mv /home/ubn/run.sh /home/ubn/Shared/` | |
+| **IX. 設定匯出** | **配置檔案位置** | 伺服器 | `sudo nano /etc/exports`<br>`/home/ubn/Shared 192.168.8.0/24(rw,sync,no_subtree_check)` | |
+| **X. 啟用服務** | **立即生效** | 伺服器 | `sudo exportfs -ra`<br>`sudo systemctl restart nfs-server` | |
 
 ---
 
@@ -33,9 +28,9 @@
 
 | 階段 | 主題強調 | 設備 | 執行指令 / 內容 | 目的與說明 |
 | :--- | :--- | :--- | :--- | :--- |
-| **XII. 生成金鑰** | **管理機設置** | 管理機 | `ssh-keygen -t rsa -b 4096` | 在 MobaXterm Local Terminal 或 管理機上執行，生成公鑰。 |
-| **XIII. 部署公鑰** | **無密碼前提** | 管理機 | `ssh-copy-id ubn@<目標VM的IP地址>` | **必須** 將公鑰部署到所有 VM。 |
-| **XIV. 測試掛載** | **確認連線** | 客戶端 | `sudo mount 192.168.8.40:/home/ubn/Shared /mnt/getshare` | 確保網路和 NFS 服務正常。 |
-| **XV. 設定 fstab** | **永久掛載** | 客戶端 | **編輯：** `sudo nano /etc/fstab` | 確保開機時自動掛載。 |
-| **XVI. 新增配置** | **配置行內容** | 客戶端 | **新增：** `192.168.8.40:/home/ubn/Shared /mnt/getshare nfs defaults,ro,hard,intr,noatime,x-systemd.automount 0 0` | 寫入正確的伺服器 IP 和路徑。 |
-| **XVII. 最終驗證** | **啟動檢查** | 客戶端 | `sudo mount -a`<br>`ls -l /mnt/getshare` | 立即載入新的 `fstab` 配置並驗證檔案。 |
+| **XI. 生成金鑰** | **管理機設置** | 管理機 | `ssh-keygen -t rsa -b 4096` | |
+| **XII. 部署公鑰** | **無密碼前提** | 管理機 | `ssh-copy-id ubn@<目標VM的IP地址>` | |
+| **XIII. 測試掛載** | **確認連線** | 客戶端 | `sudo mount 192.168.8.40:/home/ubn/Shared /mnt/getshare` | |
+| **XIV. 設定 fstab** | **永久掛載** | 客戶端 | `sudo nano /etc/fstab` | |
+| **XV. 新增配置** | **配置行內容** | 客戶端 | `192.168.8.40:/home/ubn/Shared /mnt/getshare nfs defaults,ro,hard,intr,noatime,x-systemd.automount 0 0` | |
+| **XVI. 最終驗證** | **啟動檢查** | 客戶端 | `sudo mount -a`<br>`ls -l /mnt/getshare` | |
