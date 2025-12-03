@@ -1,81 +1,119 @@
-範本 VM 最佳化與通用化配置
-🛠️ 第一部分：標準化安裝與設定 (要保留的)
+# 🚀 虛擬機基礎設施部署與管理指南 (NFS + SSH 自動化)
 
-這是您希望所有新部署的 VM 都具備的基礎服務：
+本文件整理了從 VM 範本 (Template) 準備到 NFS 共享配置，以及使用 SSH 金鑰實現批量自動化管理的完整流程。
 
-    安裝 SSH 伺服器 (Openssh-server): 確保所有未來的 VM 都可以遠端連線。
-    Bash
+## 🎯 階段一：基礎 VM 範本通用化 (Template Generalization)
 
-sudo apt update
-sudo apt install openssh-server
+在 ESXi 環境中製作範本前，移除 VM 獨特的識別符是防止網路和 SSH 衝突的關鍵。
 
-安裝 NFS 客戶端/伺服器工具: 確保所有 VM 都具備連線和共享檔案的能力。
-Bash
+### 1. 服務安裝與系統優化
 
-sudo apt install nfs-common nfs-kernel-server
+| 主題 | 說明 | 執行指令 |
+| :--- | :--- | :--- |
+| **預裝核心工具** | 安裝 SSH 伺服器和 NFS 共享所需的所有工具。 | `sudo apt update`<br>`sudo apt install -y openssh-server nfs-common nfs-kernel-server` |
+| **日誌大小限制** | 防止系統日誌無限增長佔用硬碟空間。 | **編輯:** `sudo nano /etc/systemd/journald.conf` <br>**設定:** `SystemMaxUse=500M` |
 
-設置通用使用者帳戶： 確保您常用的管理帳戶 (ubn) 已經建立，並且 sudo 權限正常。
+### 2. 清理唯一識別符 (Template Clean Up)
 
-限制日誌大小（推薦）： 避免 VM 啟動後日誌無限制增長佔滿硬碟空間。
-Bash
+```bash
+# A. 移除 SSH Host Keys (最關鍵！防止複製後的 SSH 衝突)
+sudo rm -f /etc/ssh/ssh_host_*
 
-    sudo nano /etc/systemd/journald.conf
-    # 在 [Journal] 區塊新增或修改為：
-    # SystemMaxUse=500M
-
-🧹 第二部分：清理與通用化 (要移除的)
-
-在將 VM 關機並製作成範本之前，移除所有唯一的識別符是確保所有複製出來的 VM 能夠順利運行的關鍵：
-1. 移除 SSH Host Keys (最重要！)
-
-SSH Host Keys 是每台機器的唯一識別符。複製範本時，如果新舊 VM 擁有相同的 Key，會導致 SSH 連線時出現安全警告或衝突。
-Bash
-
-# 移除所有 host keys
-sudo rm /etc/ssh/ssh_host_*
-
-    結果： 新 VM 第一次啟動時，會自動重新生成一套全新的 Host Key。
-
-2. 清理網路和 MAC 地址記錄
-
-舊的網路配置可能會導致複製出來的 VM 抓不到新的 IP 或網卡：
-Bash
-
-# 清理 udev 規則中的 MAC 地址記錄 (舊 Ubuntu/CentOS 常見)
+# B. 清理網路綁定記錄
 sudo rm -f /etc/udev/rules.d/70-persistent-net.rules
 
-# 清理 netplan/network-manager 狀態 (新 Ubuntu)
-sudo rm -f /etc/netplan/*
-sudo rm -f /var/lib/NetworkManager/dhclient-*
-
-3. 清理系統日誌和快取
-
-減少範本的大小並確保新 VM 從乾淨的日誌開始：
-Bash
-
-# 清理系統日誌
-sudo journalctl --vacuum-time=1d  # 只保留過去一天的日誌
-sudo journalctl --vacuum-size=50M # 限制日誌總大小
-
-# 清理 apt 快取 (下載的安裝包)
+# C. 清理快取與歷史記錄
 sudo apt clean
+history -c && rm -f ~/.bash_history
 
-# 清理 bash 歷史記錄
-history -c && rm ~/.bash_history
 
-4. 清理 SSH 金鑰授權 (可選)
+-------------------------------------------------------------------------------------------
 
-如果您不希望範本中包含任何舊的 SSH 登入金鑰配置：
+
+階段二：NFS 共享服務配置 (伺服器端: 192.168.8.40)
+
+將其中一台 VM 配置為 NFS 伺服器，並設定共享路徑為 /home/ubn/Shared。
+
+1. 準備共享目錄與權限
 Bash
 
-# 移除 ubn 用戶的授權金鑰
-rm -f /home/ubn/.ssh/authorized_keys
+# 創建共享目錄並確保 ubn 擁有權限
+sudo mkdir -p /home/ubn/Shared
+sudo chown ubn:ubn /home/ubn/Shared
 
-    結果： 範本複製出來後，您可以乾淨地重新部署 SSH 金鑰（如我們在前面討論的）。
+# 放置要共享的檔案
+mv /home/ubn/run.sh /home/ubn/Shared/
 
-🔌 最後一步：關機
-
-在執行完所有清理和安裝工作後，請正常關機，然後再將此 VM 轉換為 ESXi 範本：
+2. 匯出配置與啟用服務
 Bash
 
-sudo shutdown now
+# 編輯 NFS 匯出配置檔案
+sudo nano /etc/exports
+
+# 貼上匯出規則 (允許 192.168.8.x 網段讀寫)
+/home/ubn/Shared 192.168.8.0/24(rw,sync,no_subtree_check)
+
+# 重新載入配置並重啟服務
+sudo exportfs -ra
+sudo systemctl restart nfs-server
+
+-------------------------------------------------------------------------------------------
+
+🔑 階段三：SSH 自動化與客戶端批量管理
+
+這是實現無密碼管理和自動化配置的流程。
+1. SSH 金鑰設置 (實現無密碼連線)
+
+執行位置： 在您用於管理的電腦 (MobaXterm Local Terminal 或 管理機) 上執行。
+Bash
+
+# A. 生成金鑰 (使用預設值即可)
+ssh-keygen -t rsa -b 4096
+
+# B. 部署公鑰到所有目標 VM (客戶端和共享伺服器)
+# *此為最後一次需要輸入密碼*
+ssh-copy-id ubn@<目標VM的IP地址>
+
+2. 客戶端配置批量更新腳本
+
+使用此腳本可一鍵修正客戶端 VM /etc/fstab 中的舊 IP 地址和路徑。
+Bash
+
+# 請將此內容儲存為 update_fstab.sh 檔案，並給予執行權限: chmod +x update_fstab.sh
+#!/bin/bash
+
+# --- 固定配置變數 (請勿修改，除非路徑有變) ---
+USER="ubn"
+OLD_PATH="/home/ubn/share"   # 客戶端 fstab 中現有的舊路徑部分
+NEW_PATH="/home/ubn/Shared"  # 共享伺服器上正確的新路徑部分
+MOUNT_POINT="/mnt/getshare"
+SSH_OPTIONS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+# --- 互動輸入 ---
+echo "--- 客戶端 NFS 配置自動更新工具 ---"
+read -p "1. 請輸入要修改的客戶端 VM IP: " CLIENT_IP
+read -p "2. 請輸入客戶端 fstab 中現有的【舊共享 IP】: " OLD_SHARE_IP
+read -p "3. 請輸入新的共享 VM IP: " NEW_SHARE_IP
+
+# 構建替換字串
+OLD_CONFIG="${OLD_SHARE_IP}:${OLD_PATH}"
+NEW_CONFIG="${NEW_SHARE_IP}:${NEW_PATH}"
+
+echo "--- 正在連線並自動更新 ${CLIENT_IP} ---"
+
+# --- 遠端 SSH 命令執行 (利用金鑰實現無密碼操作) ---
+ssh ${USER}@${CLIENT_IP} ${SSH_OPTIONS} "
+  echo '1. 正在替換 fstab 中的 NFS 共享配置...'
+  sudo sed -i 's|${OLD_CONFIG}|${NEW_CONFIG}|g' /etc/fstab;
+
+  echo '2. 正在嘗試卸載舊的掛載點 ${MOUNT_POINT}...'
+  sudo umount -l ${MOUNT_POINT};
+
+  echo '3. 正在應用新的 fstab 配置並重新掛載...'
+  sudo mount -a;
+  
+  echo '4. 驗證新的掛載狀態...'
+  mount | grep getshare;
+"
+
+echo "--- 客戶端 ${CLIENT_IP} 配置更新完成 ---"
