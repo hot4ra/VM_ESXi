@@ -1,0 +1,23 @@
+#!/bin/bash
+# template_setup.sh: VM 範本製作前的通用化與清理腳本
+
+# --- 階段一：服務安裝與準備 ---
+echo "--- 1/3: 安裝核心服務與創建掛載點 ---"
+sudo apt update
+sudo apt install -y openssh-server nfs-common nfs-kernel-server
+sudo mkdir -p /mnt/getshare
+
+# --- 階段一：日誌與清理 ---
+echo "--- 2/3: 日誌優化與清理 ---"
+# 限制系統日誌大小
+echo "SystemMaxUse=500M" | sudo tee -a /etc/systemd/journald.conf > /dev/null
+# 清理舊記錄與快取
+sudo rm -f /etc/udev/rules.d/70-persistent-net.rules
+sudo apt clean
+history -c && rm -f ~/.bash_history
+
+# 移除 SSH Host Keys (最關鍵!)
+echo "--- 3/3: 移除 SSH Host Keys ---"
+sudo rm -f /etc/ssh/ssh_host_*
+
+echo "--- 範本準備完成。請確認配置並關機製作範本。 ---"
